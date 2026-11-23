@@ -43,6 +43,13 @@ Não há nada para compilar: o WAR já está versionado em `dist/`. Os três arq
 (`CustomFusionWeb.war`, `instalar-cavidades.sh`, `configurar-sessao-fusion.sh`)
 são enviados juntos ao servidor e ficam lado a lado em `/tmp/cavidades`.
 
+> **Ajuste empacotado neste WAR:** no cadastro de molde, o campo **Máquina**
+> aceita digitar um nome ainda não cadastrado (a lista traz o catálogo e as
+> máquinas já citadas em moldes). Ao salvar, a máquina nova passa a aparecer em
+> todas as listas — sem botão nem tela extra. Como o código-fonte não está neste
+> repositório, o ajuste foi aplicado direto em `dist/CustomFusionWeb.war`; se o
+> WAR for recompilado na origem, repita a alteração no fonte.
+
 ## Requisitos
 
 - Fusion já instalado no servidor, com `stop.sh` e `start.sh`;
@@ -186,7 +193,7 @@ O que esperar:
 | Verificação | Resultado esperado |
 |---|---|
 | `ls -l` | os três arquivos listados em `/tmp/cavidades` |
-| `sha256sum` | `4f676805d0f2f96ecbe16534f601427a4f694898966b41a732e1f320d95d29d6` |
+| `sha256sum` | `db5482f50c468a922d43201218fd908d0c758b3c23a20dd851619c31051d8fc8` |
 | `grep -c $'\r'` | `0` para cada arquivo (se sair `1` ou mais, há CRLF — corrija abaixo) |
 | `bash -n` | sem saída = sintaxe OK |
 
@@ -361,6 +368,8 @@ Login na Cavidades, token de API e permissão de pasta são controles distintos.
 | `syntax error near unexpected token '$'{\r''` ou `sh: set: pipefail: invalid option name` | Script com fim de linha Windows (CRLF), normalmente por transferir de uma cópia antiga | `sed -i 's/\r$//' ./instalar-cavidades.sh ./configurar-sessao-fusion.sh` e valide com `bash -n` |
 | `ERRO: o banco já existe: ...customfusion.db` / `O instalador não reutiliza nem apaga um banco existente` | Instalador **antigo** em execução | `git pull` no repositório, reenvie os três arquivos com `scp` e execute de novo. O instalador atual preserva o banco e cria backup |
 | `Informe apenas a URL base do servidor ou a URL terminada em /fusion` | URL sem o esquema (`194.0.0.109/fusion`) ou com parâmetros | Inclua `https://`: `https://194.0.0.109/fusion` |
+| Menu sem o logo | O WAR não inclui a pasta `assets/`; o servidor não tem `/assets/logos/Logo%20Compactor.svg` | Envie o SVG para `<CATALINA_BASE>/webapps/cavidades/assets/logos/` — o instalador preserva `assets/` nas atualizações |
+| Lista de máquinas vazia no cadastro de molde | Tabela `maquinas` sem registros (o pacote não traz seed de catálogo) | Digite o nome da máquina no próprio campo e salve o molde: ela entra nas listas na sequência |
 | `No such file or directory` no `ls` do servidor | `scp` não concluído ou comandos em outra pasta no Linux | Repita o `scp` e rode os comandos dentro de `/tmp/cavidades` |
 | `sha256sum` diferente do esperado | WAR corrompido ou versão errada | Repita o `scp` do `dist/CustomFusionWeb.war` |
 | `ERRO: execute como root` | Rodou sem sudo | `sudo -i` antes de executar |
@@ -407,7 +416,7 @@ autor autenticado no Fusion; o token do GED nunca é enviado pelo navegador.
 ## Artefato
 
 - WAR: [`dist/CustomFusionWeb.war`](dist/CustomFusionWeb.war)
-- SHA-256: `4F676805D0F2F96ECBE16534F601427A4F694898966B41A732E1F320D95D29D6`
+- SHA-256: `DB5482F50C468A922D43201218FD908D0C758B3C23A20DD851619C31051D8FC8`
 
 Verificação:
 
