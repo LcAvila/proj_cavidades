@@ -100,13 +100,32 @@ uma versão antiga do instalador pode recusar o banco existente (veja
 
 ## 2. Enviar os arquivos ao servidor
 
-Execute no PowerShell do computador local, **fora** da sessão SSH, na raiz do
-repositório (a pasta que contém `dist\` e `scripts\`):
+Execute no PowerShell do computador local, **fora** da sessão SSH, e **primeiro
+vá para a raiz do repositório** — a pasta que contém `dist\` e `scripts\`:
+
+```powershell
+cd C:\Users\SEU_USUARIO\Desktop\proj_cavidades
+Get-Location
+```
+
+> **Atenção:** janelas abertas como administrador costumam iniciar em
+> `C:\Windows\System32`. Se você rodar os comandos lá, os `Test-Path` retornam
+> `False` e o `scp` falha com `No such file or directory`. Confirme com
+> `Get-Location` que você está na pasta do projeto antes de continuar.
+
+Agora envie os arquivos — **a senha do servidor é pedida mais de uma vez**,
+porque cada comando `ssh`/`scp` autentica separadamente:
+
+| Comando | Senha pedida |
+|---|---|
+| `ssh $server "mkdir -p /tmp/cavidades"` | 1ª vez |
+| `scp ...` | 2ª vez |
+| `ssh $server` | 3ª vez |
 
 ```powershell
 $server = "usuario@servidor"
 
-# confirma que os três arquivos existem localmente
+# confirma que os três arquivos existem localmente (todos devem dar True)
 Test-Path .\dist\CustomFusionWeb.war
 Test-Path .\scripts\instalar-cavidades.sh
 Test-Path .\scripts\configurar-sessao-fusion.sh
@@ -118,16 +137,30 @@ scp .\dist\CustomFusionWeb.war .\scripts\instalar-cavidades.sh .\scripts\configu
 # hash local do WAR (deve bater com o SHA-256 em Artefato)
 Get-FileHash .\dist\CustomFusionWeb.war -Algorithm SHA256
 
-# conecta no servidor
+# conecta no servidor (pede a senha de novo)
 ssh $server
 ```
+
+A senha digitada não aparece na tela enquanto você digita — é normal parecer
+"travado". Se algum `Test-Path` retornar `False`, você não está na raiz do
+repositório; volte ao `cd` acima.
+
+> **Opcional — parar de digitar a senha:** gere uma chave SSH e copie a chave
+> pública para o servidor. Depois disso, `ssh` e `scp` não pedem senha:
+>
+> ```powershell
+> ssh-keygen -t ed25519
+> type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh $server "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+> ```
 
 Os três arquivos precisam ficar **lado a lado** em `/tmp/cavidades`, não em
 subpastas.
 
 ## 3. Validar os arquivos no servidor
 
-Ainda conectado ao servidor via `ssh`, com privilégios de root:
+Ainda conectado ao servidor via `ssh`, dê privilégios de root. O `sudo -i` pede
+a senha do usuário do servidor **mais uma vez** (a mesma do SSH; não aparece na
+tela):
 
 ```bash
 sudo -i
@@ -322,9 +355,11 @@ Login na Cavidades, token de API e permissão de pasta são controles distintos.
 
 | Sintoma | Causa | Solução |
 |---|---|---|
+| `Test-Path` retorna `False` e o `scp` falha com `No such file or directory` | Comandos rodados fora da raiz do repositório (ex.: `C:\Windows\System32`) | `cd C:\Users\SEU_USUARIO\Desktop\proj_cavidades` e confirme com `Get-Location` antes de repetir |
+| `ssh`/`scp` pedem a senha várias vezes | Cada comando autentica separadamente (mkdir, scp, ssh final, sudo) | Digite a senha a cada prompt, ou configure uma chave SSH para dispensá-la |
 | `syntax error near unexpected token '$'{\r''` ou `sh: set: pipefail: invalid option name` | Script com fim de linha Windows (CRLF), normalmente por transferir de uma cópia antiga | `sed -i 's/\r$//' ./instalar-cavidades.sh ./configurar-sessao-fusion.sh` e valide com `bash -n` |
 | `ERRO: o banco já existe: ...customfusion.db` / `O instalador não reutiliza nem apaga um banco existente` | Instalador **antigo** em execução | `git pull` no repositório, reenvie os três arquivos com `scp` e execute de novo. O instalador atual preserva o banco e cria backup |
-| `No such file or directory` no `ls` | `scp` não concluído ou comandos em outra pasta | Repita o `scp` a partir da raiz do repositório |
+| `No such file or directory` no `ls` do servidor | `scp` não concluído ou comandos em outra pasta no Linux | Repita o `scp` e rode os comandos dentro de `/tmp/cavidades` |
 | `sha256sum` diferente do esperado | WAR corrompido ou versão errada | Repita o `scp` do `dist/CustomFusionWeb.war` |
 | `ERRO: execute como root` | Rodou sem sudo | `sudo -i` antes de executar |
 | `ERRO: não foi possível detectar um único Tomcat com o contexto /fusion` | Mais de uma instalação compatível, ou Tomcat parado | Defina `CATALINA_BASE`, `FUSION_HOME` e `FUSION_DOCBASE` e rode de novo |
