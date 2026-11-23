@@ -145,8 +145,9 @@ A senha digitada não aparece na tela enquanto você digita — é normal parece
 "travado". Se algum `Test-Path` retornar `False`, você não está na raiz do
 repositório; volte ao `cd` acima.
 
-> **Opcional — parar de digitar a senha:** gere uma chave SSH e copie a chave
-> pública para o servidor. Depois disso, `ssh` e `scp` não pedem senha:
+> **Opcional — parar de digitar a senha:** gere uma chave SSH **no PowerShell
+> do Windows** (não no servidor) e copie a chave pública para o servidor. Depois
+> disso, `ssh` e `scp` não pedem senha:
 >
 > ```powershell
 > ssh-keygen -t ed25519
@@ -211,7 +212,7 @@ O instalador precisa de root (`execute como root`) e pergunta, nesta ordem:
 
 | Pergunta | Obrigatório? | Observação |
 |---|---|---|
-| `URL do servidor/Fusion` | Sim | Ex.: `https://servidor` ou `https://servidor/fusion`. Informe **só** a base, sem parâmetros. |
+| `URL do servidor/Fusion` | Sim | Ex.: `https://servidor` ou `https://servidor/fusion`. É obrigatório começar com `http://` ou `https://` e informar **só** a base, sem parâmetros (`194.0.0.109/fusion` é recusado). |
 | `Pasta base de destino no GED` | Não | `Enter` deixa a publicação desabilitada para configurar depois. |
 | `Token do GED` | Não | Só aparece se a pasta foi informada. Não é exibido na tela (`read -s`). |
 | `Confirma a instalação? Digite SIM:` | Sim | Digite exatamente `SIM`; qualquer outra coisa cancela sem alterar nada. |
@@ -359,6 +360,7 @@ Login na Cavidades, token de API e permissão de pasta são controles distintos.
 | `ssh`/`scp` pedem a senha várias vezes | Cada comando autentica separadamente (mkdir, scp, ssh final, sudo) | Digite a senha a cada prompt, ou configure uma chave SSH para dispensá-la |
 | `syntax error near unexpected token '$'{\r''` ou `sh: set: pipefail: invalid option name` | Script com fim de linha Windows (CRLF), normalmente por transferir de uma cópia antiga | `sed -i 's/\r$//' ./instalar-cavidades.sh ./configurar-sessao-fusion.sh` e valide com `bash -n` |
 | `ERRO: o banco já existe: ...customfusion.db` / `O instalador não reutiliza nem apaga um banco existente` | Instalador **antigo** em execução | `git pull` no repositório, reenvie os três arquivos com `scp` e execute de novo. O instalador atual preserva o banco e cria backup |
+| `Informe apenas a URL base do servidor ou a URL terminada em /fusion` | URL sem o esquema (`194.0.0.109/fusion`) ou com parâmetros | Inclua `https://`: `https://194.0.0.109/fusion` |
 | `No such file or directory` no `ls` do servidor | `scp` não concluído ou comandos em outra pasta no Linux | Repita o `scp` e rode os comandos dentro de `/tmp/cavidades` |
 | `sha256sum` diferente do esperado | WAR corrompido ou versão errada | Repita o `scp` do `dist/CustomFusionWeb.war` |
 | `ERRO: execute como root` | Rodou sem sudo | `sudo -i` antes de executar |
