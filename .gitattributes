@@ -1,0 +1,6 @@
+# Os scripts precisam de LF: o bash do Linux falha em "set -euo pipefail\r".
+*.sh text eol=lf
+
+# Artefatos binários: não normalizar nem converter fim de linha.
+*.war -text
+*.db -text
