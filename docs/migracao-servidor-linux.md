@@ -66,23 +66,26 @@ aparecerem. Compare o resultado de `sha256sum` com o SHA-256 esperado acima.
 O instalador usa o `CustomFusionWeb.war` no mesmo diretório. Ele extrai e
 implanta o conteúdo como `/cavidades`; não é necessário renomear o WAR.
 
-Informe os valores encontrados no servidor, sem reutilizar caminhos ou URLs de
-outro ambiente:
+O instalador detecta automaticamente o Tomcat ativo, o contexto `/fusion` no
+`server.xml`, o diretório do Fusion e o usuário do Tomcat. Informe uma única
+URL base do servidor (por exemplo, `https://servidor:porta`) ou a URL do Fusion
+terminada em `/fusion`. As URLs da aplicação e de validação são derivadas
+automaticamente. O endpoint do GED (`/api/v1/documents/`) é padrão no
+aplicativo e não precisa ser informado.
 
-- diretório base do Tomcat que executa o Fusion;
-- diretório do Fusion e `docBase` declarado no `server.xml`;
-- URL interna do Fusion e URLs públicas de login e da Cavidades;
-- URL local para validar a API;
-- caminho novo do SQLite e usuário do Tomcat;
-- nome/caminho exato da pasta de destino no GED;
-- token do GED (opcional nesta etapa; é digitado sem aparecer na tela).
+A pasta GED é opcional durante a instalação; informe o nome/caminho exato
+existente no Fusion para habilitar a publicação. O token só é solicitado quando
+a pasta é informada; ele não aparece na tela e pode ser deixado em branco para
+configurar depois. O caminho do banco novo e o usuário do Tomcat são
+detectados/calculados automaticamente. Se a detecção do Fusion falhar, o
+instalador interrompe antes de alterar o servidor. Se o banco já existir, ele
+também interrompe sem sobrescrevê-lo.
 
-O instalador mostra um resumo antes de prosseguir. Confirme que o Tomcat
-selecionado é o do Fusion, não o Tomcat do OLAP, e que o destino GED é a pasta
-existente com as permissões corretas. O script também pede confirmação antes de
-configurar `sessionCookiePath=/`: isso faz o navegador enviar o cookie de
-sessão do Fusion a todos os contextos no mesmo host e porta. Faça isso apenas
-se esses aplicativos forem confiáveis.
+Revise o resumo antes de confirmar. Confirme que o Tomcat detectado é o do
+Fusion, não o do OLAP, e que a pasta GED está correta. O script também pede
+confirmação antes de configurar `sessionCookiePath=/`: isso faz o navegador
+enviar o cookie de sessão do Fusion a todos os contextos no mesmo host e porta.
+Faça isso apenas se esses aplicativos forem confiáveis.
 
 O banco precisa estar em um caminho novo e vazio. O instalador recusa sobrescrever
 um banco existente, preserva a aplicação anterior em um backup temporário,

@@ -10,8 +10,12 @@ SESSION_SETUP="$BASE/configurar-sessao-fusion.sh"
 CATALINA_BASE="${CATALINA_BASE:-}"
 FUSION_HOME="${FUSION_HOME:-}"
 FUSION_DOCBASE="${FUSION_DOCBASE:-}"
+FUSION_DOCBASE_PATH="${FUSION_DOCBASE_PATH:-}"
+SERVER_URL="${SERVER_URL:-}"
+SERVER_ORIGIN="${SERVER_ORIGIN:-}"
 FUSION_BASE_URL="${FUSION_BASE_URL:-}"
 FUSION_LOGIN_URL="${FUSION_LOGIN_URL:-}"
+FUSION_PORTAL_URL="${FUSION_PORTAL_URL:-}"
 CAVIDADES_PUBLIC_URL="${CAVIDADES_PUBLIC_URL:-}"
 CAVIDADES_HEALTH_URL="${CAVIDADES_HEALTH_URL:-}"
 DB_FILE="${DB_FILE:-}"
@@ -26,7 +30,11 @@ ask_value() {
   local label="$2"
   local default="$3"
   local answer
-  read -r -p "$label [$default]: " answer
+  if [[ -n "$default" ]]; then
+    read -r -p "$label [$default]: " answer
+  else
+    read -r -p "$label (Enter para configurar depois): " answer
+  fi
   printf -v "$variable" '%s' "${answer:-$default}"
 }
 
@@ -63,6 +71,133 @@ cleanup() {
   unset FUSION_API_TOKEN || true
 }
 
+detect_fusion_layout() {
+  local detected
+  local -a values=()
+  detected="$(python3 - <<'PY'
+import glob
+import os
+import pwd
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+def local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+def context_for(base):
+    config = base / "conf" / "server.xml"
+    if not config.is_file() or not (base / "webapps").is_dir():
+        return None
+    try:
+        root = ET.parse(config).getroot()
+    except (OSError, ET.ParseError):
+        return None
+
+    matches = []
+    for host in root.iter():
+        if local_name(host.tag) != "Host":
+            continue
+        app_base = Path(host.get("appBase", "webapps"))
+        if not app_base.is_absolute():
+            app_base = base / app_base
+        for context in host.iter():
+            if local_name(context.tag) == "Context" and context.get("path") == "/fusion":
+                docbase = context.get("docBase")
+                if not docbase:
+                    continue
+                resolved = Path(docbase)
+                if not resolved.is_absolute():
+                    resolved = app_base / resolved
+                matches.append((docbase, resolved))
+    return matches
+
+requested_base = os.environ.get("CATALINA_BASE", "").strip()
+requested_home = os.environ.get("FUSION_HOME", "").strip()
+requested_docbase = os.environ.get("FUSION_DOCBASE", "").strip()
+candidates = []
+if requested_base:
+    candidates.append(Path(requested_base))
+else:
+    for procfile in glob.glob("/proc/[0-9]*/cmdline"):
+        try:
+            args = Path(procfile).read_bytes().split(b"\0")
+            args = [arg.decode(errors="replace") for arg in args if arg]
+        except OSError:
+            continue
+        if not any("org.apache.catalina.startup.Bootstrap" in arg for arg in args):
+            continue
+        for arg in args:
+            if arg.startswith("-Dcatalina.base="):
+                candidates.append(Path(arg.split("=", 1)[1]))
+                break
+
+    for pattern in (
+        "/opt/tomcat/*/conf/server.xml",
+        "/opt/tomcat/conf/server.xml",
+        "/opt/apache-tomcat*/conf/server.xml",
+        "/opt/*/conf/server.xml",
+        "/usr/local/tomcat/conf/server.xml",
+        "/usr/share/tomcat*/conf/server.xml",
+        "/var/lib/tomcat*/conf/server.xml",
+    ):
+        candidates.extend(Path(path).parent.parent for path in glob.glob(pattern))
+
+unique_bases = list(dict.fromkeys(path.resolve() for path in candidates))
+layouts = []
+for base in unique_bases:
+    contexts = context_for(base)
+    if not contexts:
+        continue
+    for docbase, resolved_docbase in contexts:
+        if requested_docbase and docbase != requested_docbase:
+            continue
+        home = Path(requested_home).resolve() if requested_home else None
+        if home is None:
+            probe = resolved_docbase if resolved_docbase.is_dir() else resolved_docbase.parent
+            for candidate in (probe, *probe.parents):
+                if (candidate / "stop.sh").is_file() and (candidate / "start.sh").is_file():
+                    home = candidate
+                    break
+        if home is None:
+            continue
+        if not (home / "stop.sh").is_file() or not (home / "start.sh").is_file():
+            continue
+        try:
+            owner = os.environ.get("TOMCAT_USER", "").strip()
+            if not owner:
+                owner = pwd.getpwuid(os.stat(base / "webapps").st_uid).pw_name
+        except (OSError, KeyError):
+            continue
+        layouts.append((str(base), docbase, str(resolved_docbase), str(home), owner))
+
+layouts = list(dict.fromkeys(layouts))
+if len(layouts) != 1:
+    if not layouts:
+        raise SystemExit(
+            "Não foi possível detectar um único Tomcat com o contexto /fusion e os scripts do Fusion. "
+            "Confira o Tomcat em execução ou defina CATALINA_BASE, FUSION_HOME e FUSION_DOCBASE."
+        )
+    bases = ", ".join(item[0] for item in layouts)
+    raise SystemExit(
+        "Mais de uma instalação Fusion compatível foi detectada: "
+        + bases
+        + ". Defina CATALINA_BASE e FUSION_DOCBASE para escolher a correta."
+    )
+print("\n".join(layouts[0]))
+PY
+)" || return 1
+  mapfile -t values <<< "$detected"
+  if [[ "${#values[@]}" -ne 5 ]]; then
+    echo "ERRO: não foi possível interpretar os caminhos detectados do Fusion." >&2
+    return 1
+  fi
+  CATALINA_BASE="${CATALINA_BASE:-${values[0]}}"
+  FUSION_DOCBASE="${FUSION_DOCBASE:-${values[1]}}"
+  FUSION_DOCBASE_PATH="${FUSION_DOCBASE_PATH:-${values[2]}}"
+  FUSION_HOME="${FUSION_HOME:-${values[3]}}"
+  TOMCAT_USER="${TOMCAT_USER:-${values[4]}}"
+}
+
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
   echo "ERRO: execute como root (por exemplo: sudo bash ./instalar-cavidades.sh)." >&2
   exit 1
@@ -73,30 +208,67 @@ if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; th
   exit 1
 fi
 
-echo "Configuração da nova instalação da Cavidades."
-echo "Informe os valores específicos deste servidor; não há endereços de ambiente predefinidos."
-ask_required CATALINA_BASE "Diretório base do Tomcat do Fusion"
-ask_required FUSION_HOME "Diretório do Fusion (contém stop.sh/start.sh)"
-ask_required FUSION_DOCBASE "Caminho do Fusion usado em server.xml"
-ask_required FUSION_BASE_URL "URL interna do Fusion usada pelo servidor"
-ask_required FUSION_LOGIN_URL "URL pública do portal do Fusion"
-ask_required CAVIDADES_PUBLIC_URL "URL pública da Cavidades"
-ask_required CAVIDADES_HEALTH_URL "URL local da API para validação"
-if [[ -z "$DB_FILE" ]]; then
-  DB_FILE="$FUSION_HOME/config/cavidades/customfusion.db"
+if ! detect_fusion_layout; then
+  echo "ERRO: ajuste as variáveis CATALINA_BASE, FUSION_HOME e FUSION_DOCBASE e execute novamente." >&2
+  exit 1
 fi
-ask_value DB_FILE "Caminho do novo banco SQLite" "$DB_FILE"
 
-if [[ -z "$TOMCAT_USER" && -d "$CATALINA_BASE/webapps" ]]; then
-  TOMCAT_USER="$(stat -c '%U' "$CATALINA_BASE/webapps")"
-  [[ "$TOMCAT_USER" == "UNKNOWN" ]] && TOMCAT_USER=""
+if [[ -z "$SERVER_URL" ]]; then
+  ask_required SERVER_URL "URL do servidor/Fusion (ex.: https://servidor ou https://servidor/fusion)"
 fi
-ask_required TOMCAT_USER "Usuário que executa o Tomcat"
-ask_required FUSION_FOLDER_BASE "Nome/caminho exato da pasta base de publicação no GED"
+SERVER_ORIGIN="$(python3 - "$SERVER_URL" <<'PY'
+import sys
+from urllib.parse import urlsplit
 
-read -r -s -p "Token do GED (Enter para configurar depois): " FUSION_API_TOKEN
-printf '\n'
+value = sys.argv[1].strip()
+try:
+    url = urlsplit(value)
+    _ = url.port
+except ValueError as error:
+    raise SystemExit(f"URL inválida: {error}")
+if (url.scheme not in ("http", "https") or not url.netloc or not url.hostname
+        or url.username or url.password or url.query or url.fragment
+        or url.path.rstrip("/") not in ("", "/fusion")):
+    raise SystemExit(
+        "Informe apenas a URL base do servidor ou a URL terminada em /fusion, "
+        "sem parâmetros."
+    )
+print(f"{url.scheme}://{url.netloc}")
+PY
+)" || exit 1
+FUSION_BASE_URL="${FUSION_BASE_URL:-$SERVER_ORIGIN/fusion}"
+FUSION_LOGIN_URL="${FUSION_LOGIN_URL:-$FUSION_BASE_URL}"
+CAVIDADES_PUBLIC_URL="${CAVIDADES_PUBLIC_URL:-$SERVER_ORIGIN/cavidades}"
+CAVIDADES_HEALTH_URL="${CAVIDADES_HEALTH_URL:-$SERVER_ORIGIN/cavidades/api/usuario-atual}"
+FUSION_PORTAL_URL="${FUSION_PORTAL_URL:-${FUSION_BASE_URL%/}/portal}"
+DB_FILE="${DB_FILE:-$FUSION_HOME/config/cavidades/customfusion.db}"
+GED_API_URL="${FUSION_BASE_URL%/}"
+if [[ "$GED_API_URL" != */fusion ]]; then
+  GED_API_URL+="/fusion"
+fi
+GED_API_URL+="/api/v1/documents/"
+
+echo "Tomcat e Fusion detectados automaticamente:"
+echo "  Tomcat: $CATALINA_BASE"
+echo "  Fusion: $FUSION_HOME"
+echo "  Contexto Fusion: $FUSION_DOCBASE"
+echo "URLs derivadas da URL informada:"
+echo "  API GED padrão: $GED_API_URL"
+echo "  Aplicação: $CAVIDADES_PUBLIC_URL"
+
+if [[ -z "$FUSION_FOLDER_BASE" ]]; then
+  ask_value FUSION_FOLDER_BASE "Pasta base de destino no GED" ""
+fi
+if [[ -n "$FUSION_FOLDER_BASE" ]]; then
+  read -r -s -p "Token do GED (Enter para configurar depois): " FUSION_API_TOKEN
+  printf '\n'
+else
+  FUSION_API_TOKEN=""
+  echo "Pasta GED não informada; a publicação no GED ficará desabilitada até configurá-la."
+fi
 trap cleanup EXIT
+
+echo "Configuração da nova instalação da Cavidades."
 
 if [[ ! -d "$SRC" && ! -f "$WAR_SOURCE" ]]; then
   echo "ERRO: pacote incompleto; esperado app/ ou CustomFusionWeb.war ao lado deste script." >&2
@@ -161,8 +333,8 @@ if [[ ! -d "$CATALINA_BASE/webapps" || ! -d "$CATALINA_BASE/conf" ]]; then
   echo "ERRO: Tomcat não encontrado em $CATALINA_BASE." >&2
   exit 1
 fi
-if [[ ! -e "$FUSION_DOCBASE" ]]; then
-  echo "ERRO: docBase do Fusion não encontrado: $FUSION_DOCBASE." >&2
+if [[ ! -e "$FUSION_DOCBASE_PATH" ]]; then
+  echo "ERRO: docBase do Fusion não encontrado: $FUSION_DOCBASE_PATH." >&2
   exit 1
 fi
 if [[ ! -x "$FUSION_HOME/stop.sh" || ! -x "$FUSION_HOME/start.sh" ]]; then
@@ -348,6 +520,8 @@ echo "API respondeu HTTP 200 e JSESSIONID está com Path=/."
 echo "Acesse: $CAVIDADES_PUBLIC_URL"
 echo "Entre no Fusion e confirme que /cavidades/api/usuario-atual retorna autenticado=true."
 echo "application-local.properties foi gravado somente no servidor com permissão restrita."
-if [[ "$GED_TOKEN_CONFIGURED" == "false" ]]; then
+if [[ -z "$FUSION_FOLDER_BASE" ]]; then
+  echo "Configure app.fusion.folder-base e app.fusion.api-token em $APP_DIR/WEB-INF/classes/application-local.properties para publicar no GED."
+elif [[ "$GED_TOKEN_CONFIGURED" == "false" ]]; then
   echo "Configure app.fusion.api-token em $APP_DIR/WEB-INF/classes/application-local.properties para publicar no GED."
 fi

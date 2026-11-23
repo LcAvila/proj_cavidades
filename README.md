@@ -58,10 +58,10 @@ autor autenticado no Fusion; o token do GED nunca é enviado pelo navegador.
 ## Implantar em Linux
 
 O WAR e os dois scripts de implantação estão em `dist/` e `scripts/`. O
-instalador é para uma instalação nova com um Fusion existente: pergunta os
-caminhos e URLs do ambiente, o nome exato da pasta GED e o token, cria um banco
-novo, configura a sessão do Fusion e valida a API. Ele não migra nem substitui
-um banco existente.
+instalador é para uma instalação nova com um Fusion existente: detecta os
+caminhos do Tomcat/Fusion e pede a URL base do servidor. Deriva as URLs da
+aplicação e da API GED padrão. A pasta GED e o token são opcionais; o banco é
+criado em um caminho padrão. Ele não migra nem substitui um banco existente.
 
 Execute a transferência no PowerShell do computador local, fora da sessão SSH,
 na raiz do repositório clonado (a pasta que contém `dist\` e `scripts\`). O
@@ -95,8 +95,18 @@ algum estiver ausente, volte ao PowerShell local e repita o `scp`; não execute
 o instalador até que a transferência esteja completa. Compare o SHA-256 com o
 valor em [Artefato](#artefato).
 
-Responda às perguntas com os valores específicos do servidor. Após a
-instalação, entre no Fusion pelo navegador e confirme que
+O instalador detecta o Tomcat ativo, o contexto `/fusion`, o diretório do
+Fusion e o usuário do Tomcat. Informe a URL base do servidor ou a URL terminada
+em `/fusion`; as URLs da aplicação e de validação são derivadas
+automaticamente. A rota da API GED é padrão e não precisa ser informada.
+
+Informe a pasta GED apenas se quiser habilitar a publicação agora. O token é
+solicitado somente quando a pasta é informada, sem aparecer na tela, e pode ser
+deixado em branco para configurar depois. Se a detecção do Fusion falhar, o
+instalador para antes de alterar o servidor. O caminho do banco é calculado
+automaticamente; se já existir, o instalador para sem sobrescrevê-lo. Revise o
+resumo antes de digitar `SIM`.
+Após a instalação, entre no Fusion pelo navegador e confirme que
 `/cavidades/api/usuario-atual` retorna `"autenticado": true`.
 
 O [guia de instalação Linux](docs/migracao-servidor-linux.md) contém os
