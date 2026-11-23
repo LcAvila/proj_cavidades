@@ -43,12 +43,14 @@ Não há nada para compilar: o WAR já está versionado em `dist/`. Os três arq
 (`CustomFusionWeb.war`, `instalar-cavidades.sh`, `configurar-sessao-fusion.sh`)
 são enviados juntos ao servidor e ficam lado a lado em `/tmp/cavidades`.
 
-> **Ajuste empacotado neste WAR:** no cadastro de molde, o campo **Máquina**
+> **Ajustes empacotados neste WAR:** no cadastro de molde, o campo **Máquina**
 > aceita digitar um nome ainda não cadastrado (a lista traz o catálogo e as
 > máquinas já citadas em moldes). Ao salvar, a máquina nova passa a aparecer em
-> todas as listas — sem botão nem tela extra. Como o código-fonte não está neste
-> repositório, o ajuste foi aplicado direto em `dist/CustomFusionWeb.war`; se o
-> WAR for recompilado na origem, repita a alteração no fonte.
+> todas as listas — sem botão nem tela extra. Moldes com layout automático
+> `layout-generico-N` sem registro aberto no catálogo usam um diagrama genérico
+> ao invés de falhar na abertura da grade. Como o código-fonte não está neste
+> repositório, os ajustes foram aplicados direto em `dist/CustomFusionWeb.war`;
+> se o WAR for recompilado na origem, repita as alterações no fonte.
 
 ## Requisitos
 
@@ -193,7 +195,7 @@ O que esperar:
 | Verificação | Resultado esperado |
 |---|---|
 | `ls -l` | os três arquivos listados em `/tmp/cavidades` |
-| `sha256sum` | `db5482f50c468a922d43201218fd908d0c758b3c23a20dd851619c31051d8fc8` |
+| `sha256sum` | `623c6d09137da6000e705e6ec45656f731562a4bdc02ce9c0c2a735762b71448` |
 | `grep -c $'\r'` | `0` para cada arquivo (se sair `1` ou mais, há CRLF — corrija abaixo) |
 | `bash -n` | sem saída = sintaxe OK |
 
@@ -416,7 +418,7 @@ autor autenticado no Fusion; o token do GED nunca é enviado pelo navegador.
 ## Artefato
 
 - WAR: [`dist/CustomFusionWeb.war`](dist/CustomFusionWeb.war)
-- SHA-256: `DB5482F50C468A922D43201218FD908D0C758B3C23A20DD851619C31051D8FC8`
+- SHA-256: `623C6D09137DA6000E705E6EC45656F731562A4BDC02CE9C0C2A735762B71448`
 
 Verificação:
 

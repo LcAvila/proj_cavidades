@@ -36,7 +36,7 @@ Get-FileHash .\dist\CustomFusionWeb.war -Algorithm SHA256
 ```
 
 O SHA-256 esperado para este WAR é
-`DB5482F50C468A922D43201218FD908D0C758B3C23A20DD851619C31051D8FC8`.
+`623C6D09137DA6000E705E6EC45656F731562A4BDC02CE9C0C2A735762B71448`.
 Depois da transferência, compare com o hash calculado no Linux. Conecte-se ao
 servidor:
 
