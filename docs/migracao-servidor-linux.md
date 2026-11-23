@@ -14,11 +14,16 @@ nem reutiliza o banco de outro servidor e reinicia os serviços Fusion.
 ## 1. Enviar o WAR e os scripts
 
 Este repositório contém o WAR pronto em `dist/CustomFusionWeb.war`; não é
-necessário compilar no servidor. No PowerShell, informe o usuário e o endereço
-do servidor de destino:
+necessário compilar no servidor. Execute os comandos abaixo no PowerShell do
+computador local, fora da sessão SSH, na raiz do repositório clonado (a pasta
+que contém `dist\` e `scripts\`). O `scp` coloca os três arquivos diretamente
+em `/tmp/cavidades`, lado a lado.
 
 ```powershell
 $server = "usuario@servidor"
+Test-Path .\dist\CustomFusionWeb.war
+Test-Path .\scripts\instalar-cavidades.sh
+Test-Path .\scripts\configurar-sessao-fusion.sh
 ssh $server "mkdir -p /tmp/cavidades"
 scp .\dist\CustomFusionWeb.war .\scripts\instalar-cavidades.sh .\scripts\configurar-sessao-fusion.sh "${server}:/tmp/cavidades/"
 ```
@@ -30,7 +35,7 @@ Get-FileHash .\dist\CustomFusionWeb.war -Algorithm SHA256
 ```
 
 O SHA-256 esperado para este WAR é
-`DBBE282FBA1AC502ADEAF6DC5DD66B50A98A9DDF51B7B6DEB47110D88B7E3BF5`.
+`4F676805D0F2F96ECBE16534F601427A4F694898966B41A732E1F320D95D29D6`.
 Depois da transferência, compare com o hash calculado no Linux. Conecte-se ao
 servidor:
 
@@ -45,10 +50,18 @@ No servidor:
 ```bash
 sudo -i
 cd /tmp/cavidades
+ls -l ./CustomFusionWeb.war ./instalar-cavidades.sh ./configurar-sessao-fusion.sh
+sha256sum ./CustomFusionWeb.war
 bash -n ./instalar-cavidades.sh
 bash -n ./configurar-sessao-fusion.sh
 bash ./instalar-cavidades.sh
 ```
+
+O `ls` deve encontrar os três arquivos diretamente em `/tmp/cavidades`. Se o
+shell informar `No such file or directory`, a cópia não foi concluída ou os
+comandos estão sendo executados em outra pasta. Volte ao PowerShell local,
+repita o `scp` a partir da raiz do repositório e só continue quando os arquivos
+aparecerem. Compare o resultado de `sha256sum` com o SHA-256 esperado acima.
 
 O instalador usa o `CustomFusionWeb.war` no mesmo diretório. Ele extrai e
 implanta o conteúdo como `/cavidades`; não é necessário renomear o WAR.

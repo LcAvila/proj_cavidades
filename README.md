@@ -63,10 +63,16 @@ caminhos e URLs do ambiente, o nome exato da pasta GED e o token, cria um banco
 novo, configura a sessão do Fusion e valida a API. Ele não migra nem substitui
 um banco existente.
 
-No PowerShell, substitua `usuario@servidor` pelo usuário e endereço do servidor:
+Execute a transferência no PowerShell do computador local, fora da sessão SSH,
+na raiz do repositório clonado (a pasta que contém `dist\` e `scripts\`). O
+comando `scp` copia os três arquivos para a raiz de `/tmp/cavidades`, lado a
+lado.
 
 ```powershell
 $server = "usuario@servidor"
+Test-Path .\dist\CustomFusionWeb.war
+Test-Path .\scripts\instalar-cavidades.sh
+Test-Path .\scripts\configurar-sessao-fusion.sh
 ssh $server "mkdir -p /tmp/cavidades"
 scp .\dist\CustomFusionWeb.war .\scripts\instalar-cavidades.sh .\scripts\configurar-sessao-fusion.sh "${server}:/tmp/cavidades/"
 ssh $server
@@ -77,10 +83,17 @@ No servidor:
 ```bash
 sudo -i
 cd /tmp/cavidades
+ls -l ./CustomFusionWeb.war ./instalar-cavidades.sh ./configurar-sessao-fusion.sh
+sha256sum ./CustomFusionWeb.war
 bash -n ./instalar-cavidades.sh
 bash -n ./configurar-sessao-fusion.sh
 bash ./instalar-cavidades.sh
 ```
+
+O `ls` deve encontrar os três arquivos diretamente em `/tmp/cavidades`. Se
+algum estiver ausente, volte ao PowerShell local e repita o `scp`; não execute
+o instalador até que a transferência esteja completa. Compare o SHA-256 com o
+valor em [Artefato](#artefato).
 
 Responda às perguntas com os valores específicos do servidor. Após a
 instalação, entre no Fusion pelo navegador e confirme que
