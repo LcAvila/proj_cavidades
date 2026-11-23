@@ -24,6 +24,13 @@ FUSION_FOLDER_BASE="${FUSION_FOLDER_BASE:-}"
 PACKAGE_TMP_DIR=""
 STAGE_DIR=""
 HEADERS=""
+FUSION_STOPPED=false
+BACKUP=""
+APP_DIR=""
+WAR_FILE=""
+LOCAL_CONFIG=""
+PRESERVE_LOCAL_CONFIG=false
+DB_EXISTS=false
 
 ask_value() {
   local variable="$1"
@@ -59,6 +66,8 @@ ask_required() {
 }
 
 cleanup() {
+  local status=$?
+  trap - EXIT
   if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
     rm -rf -- "$STAGE_DIR"
   fi
@@ -69,6 +78,30 @@ cleanup() {
     rm -f -- "$HEADERS"
   fi
   unset FUSION_API_TOKEN || true
+  if [[ "$FUSION_STOPPED" == true ]]; then
+    if [[ -n "$BACKUP" && -d "$BACKUP" ]]; then
+      if [[ ! -e "$APP_DIR" && -e "$BACKUP/cavidades" ]]; then
+        if ! mv "$BACKUP/cavidades" "$APP_DIR"; then
+          echo "ERRO: não foi possível restaurar a aplicação anterior de $BACKUP." >&2
+          status=1
+        fi
+      fi
+      if [[ ! -e "$WAR_FILE" && -e "$BACKUP/cavidades.war" ]]; then
+        if ! mv "$BACKUP/cavidades.war" "$WAR_FILE"; then
+          echo "ERRO: não foi possível restaurar o WAR anterior de $BACKUP." >&2
+          status=1
+        fi
+      fi
+    fi
+    echo "A instalação foi interrompida; tentando iniciar os serviços Fusion..." >&2
+    if bash "$FUSION_HOME/start.sh"; then
+      FUSION_STOPPED=false
+    else
+      echo "ERRO: não foi possível iniciar os serviços Fusion automaticamente." >&2
+      status=1
+    fi
+  fi
+  exit "$status"
 }
 
 detect_fusion_layout() {
@@ -212,6 +245,103 @@ if ! detect_fusion_layout; then
   echo "ERRO: ajuste as variáveis CATALINA_BASE, FUSION_HOME e FUSION_DOCBASE e execute novamente." >&2
   exit 1
 fi
+APP_DIR="$CATALINA_BASE/webapps/cavidades"
+WAR_FILE="$CATALINA_BASE/webapps/cavidades.war"
+LOCAL_CONFIG="$APP_DIR/WEB-INF/classes/application-local.properties"
+if [[ -L "$LOCAL_CONFIG" ]]; then
+  echo "ERRO: a configuração local da instalação é um link simbólico: $LOCAL_CONFIG" >&2
+  exit 1
+fi
+if [[ -L "$APP_DIR/assets" ]]; then
+  echo "ERRO: a pasta assets da instalação é um link simbólico: $APP_DIR/assets" >&2
+  exit 1
+fi
+if [[ -e "$APP_DIR/assets" && ! -d "$APP_DIR/assets" ]]; then
+  echo "ERRO: o caminho de assets da instalação não é uma pasta: $APP_DIR/assets" >&2
+  exit 1
+fi
+if [[ -z "$DB_FILE" ]]; then
+  DB_FILE="$FUSION_HOME/config/cavidades/customfusion.db"
+  if [[ -f "$LOCAL_CONFIG" ]]; then
+    CONFIGURED_DB="$(python3 - "$LOCAL_CONFIG" <<'PY'
+import sys
+from pathlib import Path
+
+def unescape(value):
+    result = []
+    index = 0
+    escapes = {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}
+    while index < len(value):
+        char = value[index]
+        index += 1
+        if char != "\\" or index == len(value):
+            result.append(char)
+            continue
+        escaped = value[index]
+        index += 1
+        if escaped == "u" and index + 4 <= len(value):
+            digits = value[index:index + 4]
+            try:
+                result.append(chr(int(digits, 16)))
+                index += 4
+                continue
+            except ValueError:
+                pass
+        result.append(escapes.get(escaped, escaped))
+    return "".join(result)
+
+def properties(path):
+    text = Path(path).read_text(encoding="utf-8")
+    logical_lines = []
+    pending = ""
+    for physical in text.splitlines():
+        line = pending + (physical.lstrip(" \t\f") if pending else physical)
+        slashes = len(line) - len(line.rstrip("\\"))
+        if slashes % 2:
+            pending = line[:-1]
+            continue
+        logical_lines.append(line)
+        pending = ""
+    if pending:
+        logical_lines.append(pending)
+
+    result = {}
+    for line in logical_lines:
+        line = line.lstrip(" \t\f")
+        if not line or line[0] in "#!":
+            continue
+        escaped = False
+        split_at = len(line)
+        for index, char in enumerate(line):
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char in "=:" or char.isspace():
+                split_at = index
+                break
+        key = line[:split_at]
+        index = split_at
+        if index < len(line) and line[index].isspace():
+            while index < len(line) and line[index].isspace():
+                index += 1
+            if index < len(line) and line[index] in "=:":
+                index += 1
+        elif index < len(line):
+            index += 1
+        while index < len(line) and line[index].isspace():
+            index += 1
+        result[unescape(key)] = unescape(line[index:])
+    return result
+
+print(properties(sys.argv[1]).get("app.sqlite.path", ""))
+PY
+)" || exit 1
+    if [[ -n "$CONFIGURED_DB" ]]; then
+      DB_FILE="$CONFIGURED_DB"
+    fi
+  fi
+fi
 
 if [[ -z "$SERVER_URL" ]]; then
   ask_required SERVER_URL "URL do servidor/Fusion (ex.: https://servidor ou https://servidor/fusion)"
@@ -256,15 +386,22 @@ echo "URLs derivadas da URL informada:"
 echo "  API GED padrão: $GED_API_URL"
 echo "  Aplicação: $CAVIDADES_PUBLIC_URL"
 
-if [[ -z "$FUSION_FOLDER_BASE" ]]; then
-  ask_value FUSION_FOLDER_BASE "Pasta base de destino no GED" ""
-fi
-if [[ -n "$FUSION_FOLDER_BASE" ]]; then
-  read -r -s -p "Token do GED (Enter para configurar depois): " FUSION_API_TOKEN
-  printf '\n'
-else
+if [[ -f "$LOCAL_CONFIG" ]]; then
+  PRESERVE_LOCAL_CONFIG=true
+  FUSION_FOLDER_BASE=""
   FUSION_API_TOKEN=""
-  echo "Pasta GED não informada; a publicação no GED ficará desabilitada até configurá-la."
+  echo "Configuração GED local existente será preservada sem exibir o token."
+else
+  if [[ -z "$FUSION_FOLDER_BASE" ]]; then
+    ask_value FUSION_FOLDER_BASE "Pasta base de destino no GED" ""
+  fi
+  if [[ -n "$FUSION_FOLDER_BASE" ]]; then
+    read -r -s -p "Token do GED (Enter para configurar depois): " FUSION_API_TOKEN
+    printf '\n'
+  else
+    FUSION_API_TOKEN=""
+    echo "Pasta GED não informada; a publicação no GED ficará desabilitada até configurá-la."
+  fi
 fi
 trap cleanup EXIT
 
@@ -369,17 +506,49 @@ if ! id "$TOMCAT_USER" >/dev/null 2>&1; then
   echo "ERRO: usuário do Tomcat não existe: $TOMCAT_USER." >&2
   exit 1
 fi
-if [[ -e "$DB_FILE" ]]; then
-  echo "ERRO: o banco já existe: $DB_FILE" >&2
-  echo "O instalador não reutiliza nem apaga um banco existente." >&2
-  exit 1
-fi
-
 DB_DIR="$(dirname "$DB_FILE")"
-if [[ -d "$DB_DIR" ]] && find "$DB_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-  echo "ERRO: o diretório do banco já contém arquivos: $DB_DIR" >&2
-  echo "Escolha um diretório novo em DB_FILE para preservar os dados existentes." >&2
+if [[ -L "$DB_FILE" ]]; then
+  echo "ERRO: o arquivo do banco é um link simbólico: $DB_FILE" >&2
   exit 1
+elif [[ -e "$DB_FILE" ]]; then
+  DB_EXISTS=true
+  if ! python3 - "$DB_FILE" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+uri = path.as_uri() + "?mode=ro"
+try:
+    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    connection.execute("PRAGMA busy_timeout=30000")
+    result = connection.execute("PRAGMA integrity_check").fetchone()
+    if result != ("ok",):
+        raise SystemExit(f"ERRO: integrity_check do banco falhou: {result}")
+    history = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND lower(name)='historico_grades'"
+    ).fetchone()
+    if history:
+        raise SystemExit(
+            "ERRO: este banco contém a tabela historico_grades, que o esquema "
+            "do pacote atual removeria na inicialização. Nenhuma alteração foi feita."
+        )
+except sqlite3.Error as error:
+    raise SystemExit(f"ERRO: não foi possível validar o banco SQLite: {error}")
+finally:
+    if "connection" in locals():
+        connection.close()
+PY
+  then
+    exit 1
+  fi
+else
+  DB_EXISTS=false
+  if [[ -d "$DB_DIR" ]] && find "$DB_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    echo "ERRO: o diretório do banco já contém arquivos: $DB_DIR" >&2
+    echo "Defina DB_FILE para um caminho novo e vazio para uma instalação nova." >&2
+    exit 1
+  fi
 fi
 
 TOMCAT_GROUP="$(id -gn "$TOMCAT_USER")"
@@ -400,9 +569,20 @@ echo "  URL interna Fusion: $FUSION_BASE_URL"
 echo "  URL pública de login: $FUSION_LOGIN_URL"
 echo "  URL pública Cavidades: $CAVIDADES_PUBLIC_URL"
 echo "  URL de validação da API: $CAVIDADES_HEALTH_URL"
-echo "  Pasta GED: $FUSION_FOLDER_BASE"
-echo "  Banco novo: $DB_FILE"
-if [[ -n "$FUSION_API_TOKEN" ]]; then
+if [[ "$PRESERVE_LOCAL_CONFIG" == true ]]; then
+  echo "  Configuração GED: local existente será preservada (token não exibido)"
+else
+  echo "  Pasta GED: $FUSION_FOLDER_BASE"
+fi
+if [[ "$DB_EXISTS" == true ]]; then
+  echo "  Banco existente: será preservado; backup SQLite será criado e validado"
+else
+  echo "  Banco novo: $DB_FILE"
+fi
+if [[ "$PRESERVE_LOCAL_CONFIG" == true ]]; then
+  GED_TOKEN_CONFIGURED=true
+  echo "  Token GED: configuração local preservada sem exibição"
+elif [[ -n "$FUSION_API_TOKEN" ]]; then
   GED_TOKEN_CONFIGURED=true
   echo "  Token GED: informado (será gravado somente no servidor)"
 else
@@ -426,21 +606,125 @@ trap cleanup EXIT
 mkdir -p "$CATALINA_BASE/temp" "$STAGE_DIR"
 
 cp -a "$SRC/." "$STAGE_DIR/"
-{
-  printf 'app.sqlite.path=%s\n' "$DB_FILE"
-  printf 'app.fusion.base-url=%s\n' "$FUSION_BASE_URL"
-  printf 'app.fusion.login-url=%s\n' "$FUSION_LOGIN_URL"
-  printf 'app.fusion.api-token=%s\n' "$FUSION_API_TOKEN"
-  printf 'app.fusion.folder-base=%s\n' "$FUSION_FOLDER_BASE"
-} > "$STAGE_DIR/WEB-INF/classes/application-local.properties"
+if [[ "$PRESERVE_LOCAL_CONFIG" == true ]]; then
+  LOCAL_CONFIG_STAGE="$STAGE_DIR/WEB-INF/classes/application-local.properties"
+  cp -p "$LOCAL_CONFIG" "$LOCAL_CONFIG_STAGE"
+  python3 - "$LOCAL_CONFIG_STAGE" "$DB_FILE" "$FUSION_BASE_URL" "$FUSION_LOGIN_URL" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+
+def escape(value):
+    value = value.replace("\\", "\\\\").replace("\t", "\\t")
+    value = value.replace("\n", "\\n").replace("\r", "\\r")
+    if value.startswith((" ", "\f")):
+        value = "\\" + value
+    return value
+
+with path.open("a", encoding="utf-8", newline="\n") as config:
+    if path.stat().st_size:
+        config.write("\n")
+    config.write("# Atualizado pelo instalador da Cavidades; demais propriedades locais preservadas.\n")
+    config.write(f"app.sqlite.path={escape(sys.argv[2])}\n")
+    config.write(f"app.fusion.base-url={escape(sys.argv[3])}\n")
+    config.write(f"app.fusion.login-url={escape(sys.argv[4])}\n")
+PY
+else
+  {
+    printf 'app.sqlite.path=%s\n' "$DB_FILE"
+    printf 'app.fusion.base-url=%s\n' "$FUSION_BASE_URL"
+    printf 'app.fusion.login-url=%s\n' "$FUSION_LOGIN_URL"
+    printf 'app.fusion.api-token=%s\n' "$FUSION_API_TOKEN"
+    printf 'app.fusion.folder-base=%s\n' "$FUSION_FOLDER_BASE"
+  } > "$STAGE_DIR/WEB-INF/classes/application-local.properties"
+fi
 unset FUSION_API_TOKEN
 
-mkdir -p "$DB_DIR"
+if [[ "$DB_EXISTS" != true ]]; then
+  mkdir -p "$DB_DIR"
+  chown "$TOMCAT_USER:$TOMCAT_GROUP" "$DB_DIR"
+  chmod 0750 "$DB_DIR"
+fi
 chown -R "$TOMCAT_USER:$TOMCAT_GROUP" "$STAGE_DIR"
 chmod 0755 "$STAGE_DIR"
-chown "$TOMCAT_USER:$TOMCAT_GROUP" "$DB_DIR"
-chmod 0750 "$DB_DIR"
+chown "$TOMCAT_USER:$TOMCAT_GROUP" "$STAGE_DIR/WEB-INF/classes/application-local.properties"
 chmod 0640 "$STAGE_DIR/WEB-INF/classes/application-local.properties"
+
+echo "Parando os serviços Fusion para instalar..."
+FUSION_STOPPED=true
+bash "$FUSION_HOME/stop.sh"
+
+if [[ "$DB_EXISTS" == true ]]; then
+  DB_BACKUP="$(python3 - "$DB_FILE" "$STAMP" <<'PY'
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+source_path = Path(sys.argv[1])
+backup_path = source_path.with_name(
+    f"{source_path.name}.backup-{sys.argv[2]}-{os.getpid()}"
+)
+source_uri = source_path.as_uri() + "?mode=ro"
+source = None
+backup = None
+created = False
+try:
+    descriptor = os.open(backup_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(descriptor)
+    created = True
+    source = sqlite3.connect(source_uri, uri=True, timeout=30)
+    source.execute("PRAGMA busy_timeout=30000")
+    integrity = source.execute("PRAGMA integrity_check").fetchone()
+    if integrity != ("ok",):
+        raise RuntimeError(f"integrity_check do banco falhou: {integrity}")
+    history = source.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND lower(name)='historico_grades'"
+    ).fetchone()
+    if history:
+        raise RuntimeError(
+            "o banco contém historico_grades, que o esquema atual removeria"
+        )
+    backup = sqlite3.connect(backup_path, timeout=30)
+    source.backup(backup, pages=1000, sleep=0.1)
+    backup.commit()
+    integrity = backup.execute("PRAGMA integrity_check").fetchone()
+    if integrity != ("ok",):
+        raise RuntimeError(f"integrity_check do backup falhou: {integrity}")
+    backup.close()
+    backup = None
+    source.close()
+    source = None
+    os.chmod(backup_path, 0o600)
+    verified_file = os.open(backup_path, os.O_RDWR)
+    try:
+        os.fsync(verified_file)
+    finally:
+        os.close(verified_file)
+    if os.name == "posix":
+        directory = os.open(backup_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    print(backup_path)
+except Exception as error:
+    if backup is not None:
+        backup.close()
+    if source is not None:
+        source.close()
+    if created:
+        backup_path.unlink(missing_ok=True)
+    raise SystemExit(f"ERRO: backup SQLite não foi criado/verificado: {error}")
+PY
+  )"
+  echo "Backup SQLite íntegro e preservado em: $DB_BACKUP"
+fi
+if [[ -d "$APP_DIR/assets" ]]; then
+  cp -a "$APP_DIR/assets" "$STAGE_DIR/assets"
+  echo "Arquivos locais preservados de: $APP_DIR/assets"
+fi
 
 FUSION_CONFIG_ONLY=true \
 CATALINA_BASE="$CATALINA_BASE" \
@@ -449,11 +733,6 @@ FUSION_DOCBASE="$FUSION_DOCBASE" \
 FUSION_PORTAL_URL="$FUSION_PORTAL_URL" \
 bash "$SESSION_SETUP"
 
-echo "Parando os serviços Fusion para instalar..."
-bash "$FUSION_HOME/stop.sh"
-
-APP_DIR="$CATALINA_BASE/webapps/cavidades"
-WAR_FILE="$CATALINA_BASE/webapps/cavidades.war"
 if [[ -e "$APP_DIR" || -e "$WAR_FILE" ]]; then
   mkdir -m 0700 "$BACKUP"
   if [[ -e "$APP_DIR" ]]; then
@@ -468,12 +747,18 @@ mv "$STAGE_DIR" "$APP_DIR"
 STAGE_DIR=""
 
 echo "Aplicação: $APP_DIR"
-echo "Banco novo será criado em: $DB_FILE"
+if [[ "$DB_EXISTS" == true ]]; then
+  echo "Banco existente preservado em: $DB_FILE"
+  echo "Backup SQLite verificado em: $DB_BACKUP"
+else
+  echo "Banco novo será criado em: $DB_FILE"
+fi
 if [[ -d "$BACKUP" ]]; then
   echo "Aplicação anterior preservada em: $BACKUP"
 fi
 echo "Iniciando os serviços Fusion..."
 bash "$FUSION_HOME/start.sh"
+FUSION_STOPPED=false
 
 HEADERS="$(mktemp)"
 HTTP_CODE=""
@@ -520,7 +805,9 @@ echo "API respondeu HTTP 200 e JSESSIONID está com Path=/."
 echo "Acesse: $CAVIDADES_PUBLIC_URL"
 echo "Entre no Fusion e confirme que /cavidades/api/usuario-atual retorna autenticado=true."
 echo "application-local.properties foi gravado somente no servidor com permissão restrita."
-if [[ -z "$FUSION_FOLDER_BASE" ]]; then
+if [[ "$PRESERVE_LOCAL_CONFIG" == true ]]; then
+  echo "Configurações locais da instalação anterior, incluindo as do GED, foram preservadas."
+elif [[ -z "$FUSION_FOLDER_BASE" ]]; then
   echo "Configure app.fusion.folder-base e app.fusion.api-token em $APP_DIR/WEB-INF/classes/application-local.properties para publicar no GED."
 elif [[ "$GED_TOKEN_CONFIGURED" == "false" ]]; then
   echo "Configure app.fusion.api-token em $APP_DIR/WEB-INF/classes/application-local.properties para publicar no GED."

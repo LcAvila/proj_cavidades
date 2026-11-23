@@ -1,8 +1,9 @@
 # Instalar a Cavidades em um servidor Linux
 
-Este procedimento instala a Cavidades em um Tomcat que já executa o Fusion.
-Use-o para uma instalação nova: o script cria um banco SQLite novo, não migra
-nem reutiliza o banco de outro servidor e reinicia os serviços Fusion.
+Este procedimento instala ou atualiza a Cavidades em um Tomcat que já executa
+o Fusion. Em uma instalação nova, o script cria um banco SQLite. Se encontrar
+um banco existente, preserva-o, cria e valida um backup SQLite antes de trocar
+a aplicação e reinicia os serviços Fusion.
 
 ## Requisitos
 
@@ -73,13 +74,18 @@ terminada em `/fusion`. As URLs da aplicação e de validação são derivadas
 automaticamente. O endpoint do GED (`/api/v1/documents/`) é padrão no
 aplicativo e não precisa ser informado.
 
-A pasta GED é opcional durante a instalação; informe o nome/caminho exato
-existente no Fusion para habilitar a publicação. O token só é solicitado quando
-a pasta é informada; ele não aparece na tela e pode ser deixado em branco para
-configurar depois. O caminho do banco novo e o usuário do Tomcat são
-detectados/calculados automaticamente. Se a detecção do Fusion falhar, o
-instalador interrompe antes de alterar o servidor. Se o banco já existir, ele
-também interrompe sem sobrescrevê-lo.
+A pasta GED é opcional durante uma instalação nova; informe o nome/caminho
+exato existente no Fusion para habilitar a publicação. O token só é solicitado
+quando a pasta é informada; ele não aparece na tela e pode ser deixado em branco
+para configurar depois. Em uma atualização, o arquivo de configuração local e
+os arquivos existentes em `assets/` são preservados; o token GED não é exibido.
+O caminho do banco e o usuário do Tomcat são detectados/calculados automaticamente. Se o
+banco existir, o Fusion é parado temporariamente e um backup SQLite consistente
+é criado e validado antes de alterar a aplicação. O backup fica ao lado do banco
+e deve ser mantido até a atualização ser confirmada. Se o banco contiver
+`historico_grades`, o instalador interrompe antes de alterar o servidor, porque
+o esquema do pacote removeria essa tabela. Se a detecção do Fusion falhar,
+também interrompe antes de alterar o servidor.
 
 Revise o resumo antes de confirmar. Confirme que o Tomcat detectado é o do
 Fusion, não o do OLAP, e que a pasta GED está correta. O script também pede
@@ -87,10 +93,11 @@ confirmação antes de configurar `sessionCookiePath=/`: isso faz o navegador
 enviar o cookie de sessão do Fusion a todos os contextos no mesmo host e porta.
 Faça isso apenas se esses aplicativos forem confiáveis.
 
-O banco precisa estar em um caminho novo e vazio. O instalador recusa sobrescrever
-um banco existente, preserva a aplicação anterior em um backup temporário,
-instala a Cavidades e reinicia o Fusion uma vez. Não o use como procedimento de
-atualização de uma instalação com dados existentes.
+Na atualização, o backup do SQLite fica ao lado do banco operacional; não o
+remova até confirmar a aplicação e os dados. A aplicação anterior é preservada
+em um backup temporário. Se a instalação falhar após parar o Fusion, o
+instalador tenta iniciá-lo novamente. Para uma instalação nova, o diretório do
+banco deve estar vazio. O instalador nunca sobrescreve o banco existente.
 
 ## 3. Verificar a instalação
 
