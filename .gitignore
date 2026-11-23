@@ -1,0 +1,23 @@
+# Per-installation configuration and persistent data
+application-local.properties
+WEB-INF/classes/application-local.properties
+**/application-local.properties
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.stl
+*.obj
+*.glb
+*.gltf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.svg
+*.log
+catalina.out
